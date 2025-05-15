@@ -76,7 +76,7 @@ export default function FileUploadDialog({ isOpen, setIsOpen, fetchFiles }: File
                   accept=".pdf,.txt,.doc,.docx"
                   placeholder="Outline"
                   variant="outline"
-                  pt={2}
+                  pt={'6px'}
                   onChange={(e) => handleFileChange(e)}
                 />
               )}
