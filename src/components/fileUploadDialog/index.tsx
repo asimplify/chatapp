@@ -1,4 +1,4 @@
-import { BASE_URL, toastDuration, USER_TOKEN_CHAT } from "@/utils/constants";
+import { BASE_URL, toastDuration } from "@/utils/constants";
 import {
   DialogContent,
   DialogHeader,
@@ -13,7 +13,6 @@ import {
 import { Button, Input } from "@chakra-ui/react";
 import { useState } from "react";
 import { toaster } from "../ui/toaster";
-import Cookies from "js-cookie";
 
 interface FileUploadDialogProps {
   isOpen: boolean;
@@ -22,7 +21,6 @@ interface FileUploadDialogProps {
 }
 export default function FileUploadDialog({ isOpen, setIsOpen, fetchFiles }: FileUploadDialogProps) {
   const [isLoading, setIsLoading] = useState(false);
-  const token = Cookies.get(USER_TOKEN_CHAT);
 
   const handleUploadPDF = async (file: File) => {
     if (!file) return;
@@ -34,9 +32,6 @@ export default function FileUploadDialog({ isOpen, setIsOpen, fetchFiles }: File
       const response = await fetch(BASE_URL + "/upload_file", {
         method: "POST",
         body: formData,
-        // headers: {
-        //   Authorization: `Bearer ${token}`,
-        // },
       });
       const res = await response.json();
       if (!res?.has_error) {
@@ -66,7 +61,7 @@ export default function FileUploadDialog({ isOpen, setIsOpen, fetchFiles }: File
       <Portal>
         <Dialog.Backdrop />
         <Dialog.Positioner>
-          <DialogContent>
+          <DialogContent mx={4}>
             <DialogHeader>
               <DialogTitle>Upload File</DialogTitle>
             </DialogHeader>
