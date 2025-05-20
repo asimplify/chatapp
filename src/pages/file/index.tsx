@@ -93,7 +93,7 @@ export default function File() {
       const res = await response.json();
       if (!res?.has_error) {
         fetchText();
-        toaster.create({ title: "Text removed successfully", type: "success", duration: toastDuration });
+        toaster.create({ title: "Information removed successfully", type: "success", duration: toastDuration });
       } else {
         toaster.create({ title: "Something went wrong", type: "error", duration: toastDuration });
       }

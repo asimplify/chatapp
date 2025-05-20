@@ -1,15 +1,16 @@
 import { useState, useRef, useEffect } from "react";
 import { Box, Input, VStack, HStack, Text, IconButton, Image, Spinner, Button } from "@chakra-ui/react";
-import { FaPaperPlane } from "react-icons/fa";
+import { FaPaperPlane, FaMicrophone, FaMicrophoneSlash } from "react-icons/fa";
 import { BASE_URL } from "@/utils/constants";
 import BotAvatar from "@/assets/images/bot.jpg";
 import { useRouter } from "next/router";
 import { parse } from "best-effort-json-parser";
+import { convertWebmToWav } from "@/utils/helper";
 
 interface Message {
   id?: string;
   role: "user" | "assistant";
-  content: any;
+  content?: string | Blob;
   isLoading?: boolean;
 }
 
@@ -17,12 +18,104 @@ export default function Chatbot() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isConversationLoading, setIsConversationLoading] = useState<boolean>(false);
+  const [isRecording, setIsRecording] = useState(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const streamRef = useRef<MediaStream | null>(null);
   const router = useRouter();
+
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      streamRef.current = stream;
+      mediaRecorderRef.current = new MediaRecorder(stream, { mimeType: "audio/webm" });
+      audioChunksRef.current = [];
+
+      mediaRecorderRef.current.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+      mediaRecorderRef.current.onstop = sendAudio;
+      mediaRecorderRef.current.start();
+      setIsRecording(true);
+    } catch (error) {
+      console.error("Error starting recording:", error);
+      alert("Failed to access microphone. Please check permissions.");
+      setIsRecording(false);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && streamRef.current) {
+      mediaRecorderRef.current.stop();
+      streamRef.current.getTracks().forEach((track) => track.stop());
+      streamRef.current = null;
+      setIsRecording(false);
+    }
+  };
+
+  const toggleRecording = () => {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  };
+
+  const sendAudio = async () => {
+    const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+    let audio = await convertWebmToWav(audioBlob);
+    const formData = new FormData();
+    formData.append("voice_file", audio, "recording.wav");
+    setIsConversationLoading(true);
+    const userMessage: Message = {
+      role: "user",
+      content: audio,
+    };
+    setMessages((prev) => [...prev, userMessage]);
+    const placeholderBotMessage: Message = {
+      role: "assistant",
+      content: "",
+      isLoading: true,
+    };
+    setMessages((prev) => [...prev, placeholderBotMessage]);
+
+    try {
+      const response = await fetch(`${BASE_URL}/voice`, {
+        method: "POST",
+        body: formData,
+      });
+
+      const data = await response.json();
+      const assistantAudioUrl = data.audioUrl;
+
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = {
+          role: "assistant",
+          content: assistantAudioUrl,
+        };
+        return updated;
+      });
+    } catch (error) {
+      console.error("Error sending audio:", error);
+      setMessages((prev) => {
+        const updated = [...prev];
+        updated[updated.length - 1] = {
+          role: "assistant",
+          content: "Error processing voice message. Please try again.",
+        };
+        return updated;
+      });
+    } finally {
+      setIsConversationLoading(false);
+    }
+  };
 
   const sendMessage = async () => {
     if (!input.trim()) return;
-
     const userMessage: Message = {
       role: "user",
       content: input,
@@ -112,6 +205,14 @@ export default function Chatbot() {
     }
   }, [messages]);
 
+  useEffect(() => {
+    return () => {
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((track) => track.stop());
+      }
+    };
+  }, []);
+
   return (
     <>
       <Box w={{ base: "100%" }} p={{ base: 4, lg: 6 }} mx="auto" flex="1">
@@ -165,7 +266,7 @@ export default function Chatbot() {
                 )}
                 <VStack
                   align={msg?.role === "user" ? "end" : "start"}
-                  bg={msg?.role === "user" ? "#3D2D4C" : "transparent"}
+                  bg={msg?.role === "user" && typeof msg?.content === "string" ? "#3D2D4C" : "transparent"}
                   p={2}
                   borderRadius="md"
                   gap={2}
@@ -174,13 +275,24 @@ export default function Chatbot() {
                   {msg?.isLoading && msg?.role === "assistant" ? (
                     <Spinner size="sm" mt={1} color="#3D2D4C" />
                   ) : (
-                    <Text
-                      color={msg?.role === "user" ? "white" : "#3D2D4C"}
-                      fontSize={{ base: "12px", lg: "14px" }}
-                      fontFamily="Roboto"
-                    >
-                      {msg?.content}
-                    </Text>
+                    <>
+                      {typeof msg?.content === "string" ? (
+                        <Text
+                          color={msg?.role === "user" ? "white" : "#3D2D4C"}
+                          fontSize={{ base: "12px", lg: "14px" }}
+                          fontFamily="Roboto"
+                        >
+                          {msg?.content}
+                        </Text>
+                      ) : (
+                        msg?.content instanceof Blob && (
+                          <audio controls style={{ maxWidth: "100%" }}>
+                            <source src={URL.createObjectURL(msg.content)} type="audio/wav" />
+                            Your browser does not support the audio element.
+                          </audio>
+                        )
+                      )}
+                    </>
                   )}
                 </VStack>
               </HStack>
@@ -204,6 +316,17 @@ export default function Chatbot() {
           boxShadow="md"
           alignItems="center"
         >
+          <IconButton
+            aria-label={isRecording ? "Stop recording" : "Start recording"}
+            onClick={toggleRecording}
+            color={isRecording ? "red.500" : "#3D2D4C"}
+            bg="transparent"
+            _hover={{ bg: "transparent" }}
+            borderRadius="full"
+            disabled={isConversationLoading}
+          >
+            {isRecording ? <FaMicrophoneSlash /> : <FaMicrophone />}
+          </IconButton>
           <Input
             placeholder="Type a message..."
             value={input}
@@ -215,7 +338,7 @@ export default function Chatbot() {
           />
           <IconButton
             aria-label="Send message"
-            onClick={sendMessage}
+            onClick={() => sendMessage()}
             color="#3D2D4C"
             bg="transparent"
             _hover={{ bg: "transparent" }}
