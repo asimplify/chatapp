@@ -5,7 +5,7 @@ import { BASE_URL } from "@/utils/constants";
 import BotAvatar from "@/assets/images/bot.jpg";
 import { useRouter } from "next/router";
 import { parse } from "best-effort-json-parser";
-import { convertWebmToWav } from "@/utils/helper";
+import { base64ToWavAudio, convertWebmToWav } from "@/utils/helper";
 
 interface Message {
   id?: string;
@@ -63,10 +63,10 @@ export default function Chatbot() {
       startRecording();
     }
   };
-
   const sendAudio = async () => {
     const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
     let audio = await convertWebmToWav(audioBlob);
+
     const formData = new FormData();
     formData.append("voice_file", audio, "recording.wav");
     setIsConversationLoading(true);
@@ -75,12 +75,6 @@ export default function Chatbot() {
       content: audio,
     };
     setMessages((prev) => [...prev, userMessage]);
-    const placeholderBotMessage: Message = {
-      role: "assistant",
-      content: "",
-      isLoading: true,
-    };
-    setMessages((prev) => [...prev, placeholderBotMessage]);
 
     try {
       const response = await fetch(`${BASE_URL}/voice`, {
@@ -89,16 +83,9 @@ export default function Chatbot() {
       });
 
       const data = await response.json();
-      const assistantAudioUrl = data.audioUrl;
-
-      setMessages((prev) => {
-        const updated = [...prev];
-        updated[updated.length - 1] = {
-          role: "assistant",
-          content: assistantAudioUrl,
-        };
-        return updated;
-      });
+      if (!data?.has_error) {
+        sendMessage(data?.result?.text);
+      }
     } catch (error) {
       console.error("Error sending audio:", error);
       setMessages((prev) => {
@@ -114,13 +101,14 @@ export default function Chatbot() {
     }
   };
 
-  const sendMessage = async () => {
-    if (!input.trim()) return;
+  const sendMessage = async (text?: string) => {
     const userMessage: Message = {
       role: "user",
       content: input,
     };
-    setMessages((prev) => [...prev, userMessage]);
+    if (!text) {
+      setMessages((prev) => [...prev, userMessage]);
+    }
     setIsConversationLoading(true);
     let formattedMessage: any = "";
     const placeholderBotMessage: Message = {
@@ -137,52 +125,71 @@ export default function Chatbot() {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ user_query: input, chat_history: messages }),
+        body: JSON.stringify({
+          user_query: text ? text : input,
+          chat_history: [],
+          is_voice: text ? true : false,
+        }),
       });
 
       if (!response.body) {
         throw new Error("No response body");
       }
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder("utf-8");
-      let accumulatedResponse = "";
+      if (text) {
+        const res = await response.json();
+        const audio = base64ToWavAudio(res?.result?.audio_base64);
+        if (!res?.has_error) {
+          setMessages((prev) => {
+            const updated = [...prev];
+            updated[updated.length - 1] = {
+              role: "assistant",
+              content: audio || "Information not available.",
+            };
+            return updated;
+          });
+        }
+      } else {
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder("utf-8");
+        let accumulatedResponse = "";
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = decoder.decode(value, { stream: true });
 
-        chunk.split("\n").forEach((line) => {
-          if (line.trim()) {
-            try {
-              accumulatedResponse += line;
-              let parsedResponse;
-              if (accumulatedResponse.length > 0) {
-                parsedResponse = parse(accumulatedResponse);
+          chunk.split("\n").forEach((line) => {
+            if (line.trim()) {
+              try {
+                accumulatedResponse += line;
+                let parsedResponse;
+                if (accumulatedResponse.length > 0) {
+                  parsedResponse = parse(accumulatedResponse);
+                }
+                formattedMessage = parsedResponse;
+                setMessages((prev) => {
+                  const updated = [...prev];
+                  updated[updated.length - 1] = {
+                    role: "assistant",
+                    content: formattedMessage?.message || "Information not available.",
+                  };
+                  return updated;
+                });
+              } catch (error) {
+                console.error("Error processing chunk:", error);
+                setMessages((prev) => {
+                  const updated = [...prev];
+                  updated[updated.length - 1] = {
+                    role: "assistant",
+                    content: "Error fetching response. Please try again.",
+                  };
+                  return updated;
+                });
               }
-              formattedMessage = parsedResponse;
-              setMessages((prev) => {
-                const updated = [...prev];
-                updated[updated.length - 1] = {
-                  role: "assistant",
-                  content: formattedMessage?.message || "Information not available.",
-                };
-                return updated;
-              });
-            } catch (error) {
-              console.error("Error processing chunk:", error);
-              setMessages((prev) => {
-                const updated = [...prev];
-                updated[updated.length - 1] = {
-                  role: "assistant",
-                  content: "Error fetching response. Please try again.",
-                };
-                return updated;
-              });
             }
-          }
-        });
+          });
+        }
       }
       setIsConversationLoading(false);
     } catch (error) {

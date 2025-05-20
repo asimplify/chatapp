@@ -70,3 +70,10 @@ export const convertWebmToWav = async (webmBlob: any) => {
     const wavBuffer = encodeWAV(audioBuffer);
     return new Blob([wavBuffer], { type: "audio/wav" });
 };
+
+export const base64ToWavAudio = (base64Data: any) => {
+    const byteArray = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+    const blob = new Blob([byteArray], { type: 'audio/wav' });
+    const audioUrl = URL.createObjectURL(blob);
+    return blob;
+}
