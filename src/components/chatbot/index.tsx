@@ -19,6 +19,7 @@ export default function Chatbot() {
   const [input, setInput] = useState("");
   const [isConversationLoading, setIsConversationLoading] = useState<boolean>(false);
   const [isRecording, setIsRecording] = useState(false);
+  const isAudioRecording = useRef<boolean>(false);
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -64,6 +65,7 @@ export default function Chatbot() {
     }
   };
   const sendAudio = async () => {
+    isAudioRecording.current = true;
     const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
     let audio = await convertWebmToWav(audioBlob);
 
@@ -106,14 +108,13 @@ export default function Chatbot() {
       role: "user",
       content: input,
     };
-    if (!text) {
+    if (!isAudioRecording.current) {
       setMessages((prev) => [...prev, userMessage]);
     }
     setIsConversationLoading(true);
     let formattedMessage: any = "";
     const placeholderBotMessage: Message = {
       role: "assistant",
-      content: "",
       isLoading: true,
     };
     setMessages((prev) => [...prev, placeholderBotMessage]);
@@ -126,9 +127,9 @@ export default function Chatbot() {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          user_query: text ? text : input,
+          user_query: isAudioRecording.current ? text : input,
           chat_history: [],
-          is_voice: text ? true : false,
+          is_voice: isAudioRecording.current ? true : false,
         }),
       });
 
@@ -136,7 +137,7 @@ export default function Chatbot() {
         throw new Error("No response body");
       }
 
-      if (text) {
+      if (isAudioRecording.current) {
         const res = await response.json();
         const audio = base64ToWavAudio(res?.result?.audio_base64);
         if (!res?.has_error) {
@@ -148,6 +149,7 @@ export default function Chatbot() {
             };
             return updated;
           });
+          isAudioRecording.current = false;
         }
       } else {
         const reader = response.body.getReader();
@@ -283,7 +285,12 @@ export default function Chatbot() {
                     <Spinner size="sm" mt={1} color="#3D2D4C" />
                   ) : (
                     <>
-                      {typeof msg?.content === "string" ? (
+                      {msg?.content instanceof Blob ? (
+                        <audio controls style={{ maxWidth: "100%" }}>
+                          <source src={URL.createObjectURL(msg.content)} type="audio/wav" />
+                          Your browser does not support the audio element.
+                        </audio>
+                      ) : msg?.content ? (
                         <Text
                           color={msg?.role === "user" ? "white" : "#3D2D4C"}
                           fontSize={{ base: "12px", lg: "14px" }}
@@ -291,14 +298,7 @@ export default function Chatbot() {
                         >
                           {msg?.content}
                         </Text>
-                      ) : (
-                        msg?.content instanceof Blob && (
-                          <audio controls style={{ maxWidth: "100%" }}>
-                            <source src={URL.createObjectURL(msg.content)} type="audio/wav" />
-                            Your browser does not support the audio element.
-                          </audio>
-                        )
-                      )}
+                      ) : null}
                     </>
                   )}
                 </VStack>
